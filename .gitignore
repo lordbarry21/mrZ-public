@@ -1,0 +1,31 @@
+# Python byte-code
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller build artifacts
+build/
+dist/
+
+# Runtime Logs & Temp Captures
+*.log
+mrz.log
+last_capture.jpg
+
+# But keep mrZ.exe for Releases - uncomment to track it
+# !mrZ.exe
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Editor & OS files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local config with secrets - keep example, ignore real one if you use env
+# config.json
