@@ -4,4 +4,4 @@ pystray>=0.19.5
 dxcam[winrt]>=0.3.0
 comtypes>=1.4.0
 numpy>=1.24
-opencv-python>=4.8
+# opencv NOT needed — dxcam uses processor_backend='numpy' (Cython kernel, no cv2)

@@ -1,4 +1,4 @@
-"""
+﻿"""
 mrZ - Ultra-Lightweight Screen Capture AI Assistant
 """
 
@@ -22,6 +22,8 @@ import pystray
 try:
     import dxcam as _dxcam
     import numpy as _np
+    # Force PyInstaller to bundle the Cython kernel (needed for processor_backend='numpy' without cv2)
+    import dxcam.processor._numpy_kernels  # noqa: F401
     _DXCAM_AVAILABLE = True
 except Exception:
     _dxcam = None
@@ -54,9 +56,8 @@ WS_EX_LAYERED = 0x00080000
 WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
 
-# Public build: no embedded keys. User must set api_key in config.json.
 EMBEDDED_BASE_URL = "https://cleanapis.com/v1"
-EMBEDDED_KEYS: list[str] = []  # <- put your API key(s) here or leave empty and use config.json
+EMBEDDED_KEYS: list[str] = []
 
 DEFAULT_CONFIG = {
     "api_base_url": "https://cleanapis.com/v1",
@@ -173,7 +174,6 @@ def parse_final_answer(raw_text: str, max_chars: int = 15) -> str:
         cleaned = cleaned[:max_chars].strip()
     return cleaned.lower()
 
-
 class ScreenCapturer:
     """Hybrid DRM-aware capture: DXGI Desktop Duplication -> WGC WinRT -> mss GDI fallback.
 
@@ -221,7 +221,7 @@ class ScreenCapturer:
             return None
         try:
             if self._dxgi_cam is None:
-                self._dxgi_cam = _dxcam.create(output_idx=0, output_color="RGB", backend="dxgi")
+                self._dxgi_cam = _dxcam.create(output_idx=0, output_color="RGB", backend="dxgi", processor_backend="numpy")
             # Retry for transient None (DXGI duplicator timing)
             frame = None
             for _ in range(4):
@@ -248,7 +248,7 @@ class ScreenCapturer:
             return None
         try:
             if self._wgc_cam is None:
-                self._wgc_cam = _dxcam.create(output_idx=0, output_color="RGB", backend="winrt")
+                self._wgc_cam = _dxcam.create(output_idx=0, output_color="RGB", backend="winrt", processor_backend="numpy")
             frame = None
             for _ in range(4):
                 frame = self._wgc_cam.grab()
@@ -325,7 +325,6 @@ class ScreenCapturer:
         _, img_bytes = self._prepare_image(chosen_img)
         self._save_debug(img_bytes)
         return base64.b64encode(img_bytes).decode("utf-8")
-
 
 class AIEngine:
     """Connects to OpenAI-compatible Vision API with multi-key failover and Claude Opus 5.5."""
@@ -413,7 +412,6 @@ class AIEngine:
         log(f"[ERR] All {len(self.keys_pool)} API keys exhausted. Last error: {last_error}")
         return last_error
 
-
 import tkinter as tk
 
 class OverlayHUD:
@@ -424,7 +422,7 @@ class OverlayHUD:
     permanently bury the overlay. If overlay is visible on the login screen
     after opening Exambro, capture path is proven.
     """
-    SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    SPINNER_FRAMES = ["â ‹", "â ™", "â ¹", "â ¸", "â ¼", "â ´", "â ¦", "â §", "â ‡", "â "]
 
     def __init__(self, config: dict):
         self.config = config
@@ -480,7 +478,7 @@ class OverlayHUD:
         return self._hwnd
 
     def _force_topmost(self):
-        """Re-assert HWND_TOPMOST — called by watchdog and after every render."""
+        """Re-assert HWND_TOPMOST â€” called by watchdog and after every render."""
         try:
             hwnd = self._get_hwnd()
             if not hwnd:
@@ -600,8 +598,7 @@ class OverlayHUD:
             except Exception:
                 pass
             self.hide_job = None
-        # _topmost_job is NOT cancelled here — watchdog keeps running for entire lifetime
-
+        # _topmost_job is NOT cancelled here â€” watchdog keeps running for entire lifetime
 
 class MrZApp:
     """Coordinator for mrZ application."""
@@ -811,7 +808,6 @@ class MrZApp:
             self.hud.root.mainloop()
         except KeyboardInterrupt:
             self.quit_app()
-
 
 if __name__ == "__main__":
     app = MrZApp()
