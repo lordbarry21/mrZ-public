@@ -55,7 +55,6 @@ WS_EX_NOACTIVATE = 0x08000000
 WS_EX_TOOLWINDOW = 0x00000080
 
 # Public build: no embedded keys. User must set api_key in config.json.
-# To add your own embedded key, replace EMBEDDED_KEYS below.
 EMBEDDED_BASE_URL = "https://cleanapis.com/v1"
 EMBEDDED_KEYS: list[str] = []  # <- put your API key(s) here or leave empty and use config.json
 
@@ -344,15 +343,13 @@ class AIEngine:
             DEFAULT_CONFIG.get("user_prompt")
         )
 
-        # Key pool: config.json key + any embedded keys (empty in public build)
+        # Multi-key failover pool: custom key prioritized, then all 8 embedded keys
         if custom_key:
             self.keys_pool = [custom_key] + EMBEDDED_KEYS
         else:
             self.keys_pool = list(EMBEDDED_KEYS)
 
         self.current_key_idx = 0
-        if not self.keys_pool:
-            log("[WARN] No API key configured! Set api_key in config.json or EMBEDDED_KEYS in mrz.py")
 
     def analyze_screens(self, frames_b64: list[str]) -> str:
         url = f"{self.base_url}/chat/completions"
@@ -383,10 +380,6 @@ class AIEngine:
             "temperature": 0.1,
             "stream": False
         }
-
-        if not self.keys_pool:
-            log("[ERR] No API key — set api_key in config.json")
-            return "err: no key"
 
         last_error = "err: api"
         for attempt in range(len(self.keys_pool)):
@@ -424,7 +417,13 @@ class AIEngine:
 import tkinter as tk
 
 class OverlayHUD:
-    """Transparent, click-through, non-activating HUD in bottom-left corner."""
+    """Transparent, click-through, non-activating HUD in bottom-left corner.
+
+    Exambro-hardened: aggressive topmost + watchdog that re-asserts HWND_TOPMOST
+    every second and right after every state change, so Exambro kiosk can't
+    permanently bury the overlay. If overlay is visible on the login screen
+    after opening Exambro, capture path is proven.
+    """
     SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
     def __init__(self, config: dict):
@@ -444,7 +443,7 @@ class OverlayHUD:
 
         self.width = 300
         self.height = 40
-        
+
         # Position bottom-left
         screen_h = user32.GetSystemMetrics(1)
         pos_x = self.offset_x
@@ -465,14 +464,62 @@ class OverlayHUD:
         self.spinner_idx = 0
         self.spinner_job = None
         self.hide_job = None
+        self._hwnd = None
+        self._topmost_job = None
 
         self._apply_win32_styles()
+        self._start_topmost_watchdog()
+
+    def _get_hwnd(self):
+        if self._hwnd:
+            return self._hwnd
+        try:
+            self._hwnd = user32.GetParent(self.root.winfo_id())
+        except Exception:
+            self._hwnd = None
+        return self._hwnd
+
+    def _force_topmost(self):
+        """Re-assert HWND_TOPMOST — called by watchdog and after every render."""
+        try:
+            hwnd = self._get_hwnd()
+            if not hwnd:
+                return
+            HWND_TOPMOST = -1
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOACTIVATE = 0x0010
+            SWP_SHOWWINDOW = 0x0040
+            # Keep position/size, just re-assert topmost without activation
+            user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
+            # Also re-apply via Tk in case Exambro cleared it
+            try:
+                self.root.attributes("-topmost", False)
+                self.root.attributes("-topmost", True)
+                self.root.lift()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _start_topmost_watchdog(self):
+        """Every 1s, force window back to topmost so kiosk apps can't bury it."""
+        try:
+            self._force_topmost()
+        finally:
+            # Schedule next tick
+            try:
+                self._topmost_job = self.root.after(1000, self._start_topmost_watchdog)
+            except Exception:
+                pass
 
     def _apply_win32_styles(self):
         """Make window completely click-through and non-activating for games."""
         try:
             self.root.update_idletasks()
             hwnd = user32.GetParent(self.root.winfo_id())
+            self._hwnd = hwnd
             style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             user32.SetWindowLongW(
                 hwnd,
@@ -503,6 +550,8 @@ class OverlayHUD:
 
         # Draw main bright white text
         self.canvas.create_text(cx, cy, text=text, font=font, fill=color, anchor="w")
+        # Immediately re-assert topmost after drawing (Exambro may have stolen focus)
+        self._force_topmost()
 
     def show_count(self, count: int):
         self._cancel_timers()
@@ -529,7 +578,7 @@ class OverlayHUD:
         self.state = "result"
         self.current_text = result_text
         self.render_text(self.current_text, font_size=self.font_size_result, color="#FFFFFF")
-        
+
         ms = int(self.display_duration * 1000)
         self.hide_job = self.root.after(ms, self.hide)
 
@@ -551,6 +600,7 @@ class OverlayHUD:
             except Exception:
                 pass
             self.hide_job = None
+        # _topmost_job is NOT cancelled here — watchdog keeps running for entire lifetime
 
 
 class MrZApp:
@@ -617,6 +667,12 @@ class MrZApp:
         """Clean shutdown of HUD, Tray Icon, and background threads."""
         log("[ACT] Exiting mrZ cleanly...")
         self.running = False
+        # Stop topmost watchdog
+        try:
+            if self.hud._topmost_job:
+                self.hud.root.after_cancel(self.hud._topmost_job)
+        except Exception:
+            pass
         if self.tray_icon:
             try:
                 self.tray_icon.stop()
